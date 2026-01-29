@@ -1,0 +1,17 @@
+.Rproj.user
+*.Rproj
+.Rhistory
+.Rdata
+.httr-oauth
+*.DS_Store
+.quarto
+/Meta/
+*.o
+*.so
+archive/
+draft/
+*.pptx
+.outpack/
+orderly_config.json
+*.pdf
+*.rds
