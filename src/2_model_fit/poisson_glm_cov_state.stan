@@ -162,10 +162,10 @@ model {
   //sigma_month ~ exponential(10);
 
   coef_cohort_births ~ normal(0, sigma_cohort_births);
-  sigma_cohort_births ~ exponential(20);
+  sigma_cohort_births ~ exponential(10);
 
   coef_cohort_month_years ~ normal(0, sigma_cohort_month_years);
-  sigma_cohort_month_years ~ exponential(20);
+  sigma_cohort_month_years ~ exponential(10);
 }
 
 generated quantities{
@@ -173,7 +173,7 @@ generated quantities{
   int<lower=0> y_pos_dis[N];
 
   real amplitude = sqrt(coef_month_c^2 + coef_month_s^2);
-  real phase_shift_cos_months = atan2(coef_month_s, coef_month_c) * N_months / (2*pi());
+  real phase_shift_cos_months = -atan2(coef_month_s, coef_month_c) * N_months / (2*pi());
 
   vector[N] lp_mu_gq;
   vector[N_cohort_births] log_offset_cohort_births_gq = log(offset_cohort_births);
@@ -205,9 +205,9 @@ generated quantities{
     real coef_month_s_prior = normal_rng(0, prior_in);
     real coef_month_c_prior = normal_rng(0, prior_in);
     vector[N_cohort_births] coef_cohort_births_prior;
-    real sigma_cohort_births_prior = exponential_rng(20);
+    real sigma_cohort_births_prior = exponential_rng(10);
     vector[N_cohort_month_years] coef_cohort_month_years_prior;
-    real sigma_cohort_month_years_prior = exponential_rng(20);
+    real sigma_cohort_month_years_prior = exponential_rng(10);
 
     for(i in 1:N_cohort_births){
       coef_cohort_births_prior[i] = normal_rng(0, sigma_cohort_births_prior);

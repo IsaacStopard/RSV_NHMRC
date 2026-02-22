@@ -3,72 +3,61 @@ library(readxl)
 library(lubridate)
 library(stringr)
 library(patchwork)
-# library(readabs)
+# library(readabs) # Sys.setenv(R_READABS_PATH = "/Users/z5238812/Documents/GitHub/RSV_NHMRC/src/1_data_cleaning")
 
 ###########################
 ##### population data #####
 ###########################
 
-# Sys.setenv(R_READABS_PATH = "/Users/z5238812/Documents/GitHub/RSV_NHMRC/src/1_data_cleaning")
-
-# estimate resident populations
-
-# population_data <- read_abs("3101.0")
-#
-# pop_fun <- function(pop, state){
-#   max_date <- max(pop$date)
-#   pop <- subset(pop, date == max_date)
-#   pop_0_1 <- subset(pop, series == "Estimated Resident Population ;  Persons ;  0 ;")$value
-#   pop_1_2 <- subset(pop, series == "Estimated Resident Population ;  Persons ;  1 ;")$value
-#   pop_t <- pop_0_1/2
-#   pop_c <- sum(pop[grepl("Persons", pop$series),"value"]) - pop_t
-#   pop_0.5_2 <- pop_0_1/2 + pop_1_2
-#   pop_all <- pop |> filter(str_detect(series, "Persons")) |> mutate(age = str_split_i(series, ";", 3) |> str_trim() |> str_replace("100 and over", "100") |> as.numeric(),
-#                                                                     state = state) |>
-#     rename(pop = value) |> select(pop, age, state)
-#
-#   return(list("data" = data.frame("date" = max_date, "pop_t" = pop_t, "pop_c" = pop_c, "pop_0.5_2" = pop_0.5_2, "state" = state),
-#               "pop_all" = pop_all))
-# }
-#
-# nsw_pop <- pop_fun(subset(population_data, table_title == "TABLE 51. Estimated Resident Population By Single Year Of Age, New South Wales"), "NSW")
-# qld_pop <- pop_fun(subset(population_data, table_title == "TABLE 53. Estimated Resident Population By Single Year Of Age, Queensland"), "QLD")
-# act_pop <- pop_fun(subset(population_data, table_title == "TABLE 58. Estimated Resident Population By Single Year Of Age, Australian Capital Territory"), "ACT")
-#
-# pop <- rbind(nsw_pop[[1]],
-#              qld_pop[[1]],
-#              act_pop[[1]])
-#
-# saveRDS(pop, "estimated_resident_populations.rds")
-
-# plotting the total populations
-
-# pop_plot <- ggplot(data = rbind(nsw_pop[[2]], qld_pop[[2]], act_pop[[2]]),
-#        aes(x = age, y = pop)) +
-#   geom_bar(stat = "identity", alpha = 0.5, col = "grey40", fill = "grey") +
-#   facet_wrap(~state) +
-#   xlab("Age group") +
-#   ylab("Estimated resident population on 01/06/2024") +
-#   theme_bw() + theme(text = element_text(size = 17))
-
 # births data
-# https://www.abs.gov.au/statistics/people/population/births-australia/latest-release#states-and-territories
-# a. The decrease in births in New South Wales in 2024 (3.4%) was in part due to an increase in birth registration processing times in 2024. Refer to Processing the data, New South Wales, in Methodology for more information.
-# b. The large increase in births in Victoria in 2024 (12.9%) was due to an improvement in birth registration processing times in 2024, following a period of processing delays. Refer to Processing the data, Victoria, in Methodology for more information.
-# c. The decrease in births in Western Australia in 2024 (4.7%) was in part due to increased birth registrations in 2023 after a registration backlog was cleared. Refer to Processing the data, Western Australia, in Methodology for more information.
-# d. Includes births registered in Norfolk Island.
-
-# births_df <- read.csv("Births registered by state or territory of registration.csv")
 
 # https://www.data.qld.gov.au/dataset/births-by-month
+# read_births_csv <- function(year){
+#   read.csv(file = paste0("QLD-births-by-month-",year,".csv")) |>
+#     rename("month" = Month, "births" = Transactions) |>
+#     mutate(year = year, cohort_birth_months = zoo::as.yearmon(make_date(year, month, 1)))
+# }
+#
+# QLD_births <- rbind(read_births_csv(2018), read_births_csv(2019), read_births_csv(2020), read_births_csv(2021), read_births_csv(2022), read_births_csv(2023), read_births_csv(2024))
+#
+# saveRDS(QLD_births, file = "QLD_births.rds")
 
-read_births_csv <- function(year){
-  read.csv(file = paste0("QLD-births-by-month-",year,".csv")) |>
-    rename("month" = Month, "births" = Transactions) |>
-    mutate(year = year, cohort_birth_months = zoo::as.yearmon(make_date(year, month, 1)))
-}
+births <- read.csv(file = "ABS_BIRTHS_MONTH_OCCURRENCE.csv") |>
+  select(Region, Month.of.occurence, TIME_PERIOD, OBS_VALUE) |> rename("state" = Region, "month" = Month.of.occurence, "year" = TIME_PERIOD, "births" = OBS_VALUE) |>
+  mutate(state = case_when(state == "New South Wales" ~ "NSW",
+                           state == "Australian Capital Territory" ~ "ACT",
+                           state == "Queensland" ~ "QLD"),
+         month = case_when(month == "January" ~ 1,
+                           month == "February" ~ 2,
+                           month == "March" ~ 3,
+                           month == "April" ~ 4,
+                           month == "May" ~ 5,
+                           month == "June" ~ 6,
+                           month == "July" ~ 7,
+                           month == "August" ~ 8,
+                           month == "September" ~ 9,
+                           month == "October" ~ 10,
+                           month == "November" ~ 11,
+                           month == "December" ~ 12),
+         cohort_birth_months = zoo::as.yearmon(make_date(year, month, 1)),
+         cohort = paste0(state, " ", cohort_birth_months),
+         births = ifelse(month == 12 & year == 2024 | month == 11 & year == 2024, NA, births)
+    ) |> na.omit()
 
-QLD_births <- rbind(read_births_csv(2018), read_births_csv(2019), read_births_csv(2020), read_births_csv(2021), read_births_csv(2022), read_births_csv(2023), read_births_csv(2024))
+# fill in final month with mean value
+
+birth_fit <- glm(births ~ factor(month) + factor(year) + state, family = "poisson", data = births)
+
+birth_pred <- round(predict(birth_fit, newdata = data.frame(month = c(rep(12, 3), rep(11, 3)), year = rep(2024, 6), state = rep(c("ACT", "NSW", "QLD"), 2)), type = "response"), digits = 0)
+
+births <- rbind(births,
+                data.frame(month = c(rep(12, 3), rep(11, 3)), year = rep(2024, 6), state = rep(c("ACT", "NSW", "QLD"), 2), births = birth_pred) |>
+                      mutate(cohort_birth_months = zoo::as.yearmon(make_date(year, month, 1)),
+                             cohort = paste0(state, " ", cohort_birth_months)
+                             )
+                )
+
+QLD_births <- subset(births, state == "QLD" & year >= 2018) |> arrange(year, month)
 
 saveRDS(QLD_births, file = "QLD_births.rds")
 
@@ -211,9 +200,9 @@ QLD_model_2_data <- left_join(full_combs, obs_combs, by = c("cohort_birth_start_
          cohort_birth_months = zoo::as.yearmon(cohort_birth_start_month),
          cohort_month_year = paste0(cohort_birth_months,"-", month,"-", year),
          offset_months = days_in_month(rsv_start_month)) |>
-  filter(age_rsv_months >= 0)
+  filter(age_rsv_months >= 0 & age_rsv_months <= (6 * 12)) # only includes data for those less than 5 years old
 
-sum(QLD_model_2_data$inc) == nrow(df_QLD)
+if(sum(QLD_model_2_data$inc) != nrow(df_QLD)){stop("incidence sum in model 2 not correct")}
 
 max(QLD_model_2_data$age_rsv_months)
 
@@ -290,8 +279,6 @@ dose_check <- rep(NA, nrow(QLD_model_2_data))
 dose_check[doses_on_inds] <- as.vector(doses_mat %*% dose_df_QLD$QLD)
 unique(dose_check)
 
-saveRDS(QLD_model_2_data, "QLD_model_2_data.rds")
-#
 #
 # dose_indices <- unlist(QLD_model_2_data_doses_ind)
 # group_lengths <- sapply(QLD_model_2_data_doses_ind, length)
@@ -310,6 +297,10 @@ saveRDS(QLD_model_2_data, "QLD_model_2_data.rds")
 # for(i in 1:length(doses_on_inds)){
 #   dose_comp[doses_on_inds[i]] = sum(dose_df_QLD$QLD[dose_indices[group_starts[i]:(group_starts[i] + group_lengths[i] - 1)]])
 # }
+
+QLD_model_2_data$age_rsv_months <- QLD_model_2_data$age_rsv_months + 0.01
+
+saveRDS(QLD_model_2_data, "QLD_model_2_data.rds")
 
 QLD_model_2_data_in <- list(
   "N" = nrow(QLD_model_2_data),
@@ -343,5 +334,8 @@ saveRDS(QLD_model_2_data_in, "QLD_model_2_data_in.rds")
 ##### New South Wales #####
 ###########################
 
+##########################################
+##### Australian Capital Territories #####
+##########################################
 
-
+# only includes data for those less than 5 years old
