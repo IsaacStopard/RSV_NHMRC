@@ -33,24 +33,24 @@ data {
   int<lower=0> N_cohort_births;
   int<lower=0> N_cohort_month_years;
 
-  int<lower=0> y[N];
+  array[N] int<lower=0> y;
 
-  int<lower=0> sample_cohort_births[N_cohort_births];
+  array[N_cohort_births] int<lower=0> sample_cohort_births;
 
   vector<lower=1, upper=N_months>[N] months;
-  int<lower=1, upper=N_years> ind_years[N];
-  int<lower=1, upper=N_cohort_births> ind_cohort_births[N];
-  int<lower=1, upper=N_cohort_month_years> ind_cohort_month_years[N];
+  array[N] int<lower=1, upper=N_years> ind_years;
+  array[N] int<lower=1, upper=N_cohort_births> ind_cohort_births;
+  array[N] int<lower=1, upper=N_cohort_month_years> ind_cohort_month_years;
 
   vector<lower=0>[N] age_months;
 
   vector<lower=0>[N] offset_months;
 
   int<lower=0> N_doses;
-  int<lower=0> dose_data[N_doses];
+  array[N_doses] int<lower=0> dose_data;
 
   int<lower=0> N_doses_on_inds;
-  int<lower=0> doses_on_inds[N_doses_on_inds];
+  array[N_doses_on_inds] int<lower=0> doses_on_inds;
   matrix<lower=0,upper=1>[N_doses_on_inds, N_doses] doses_mat;
   int<lower=0> N_doses_mat_one;
 
@@ -69,8 +69,8 @@ transformed data{
   vector[N] cos_months = cos(months * 2 * pi() / N_months);
 
   vector[N_doses_mat_one] csr_w = csr_extract_w(doses_mat);
-  int csr_v[N_doses_mat_one] = csr_extract_v(doses_mat);
-  int csr_u[N_doses_on_inds + 1] = csr_extract_u(doses_mat);
+  array[N_doses_mat_one] int csr_v = csr_extract_v(doses_mat);
+  array[N_doses_on_inds + 1] int csr_u = csr_extract_u(doses_mat);
 
 }
 
@@ -85,11 +85,11 @@ parameters {
   real coef_month_c;
 
   real<lower=0> mu_doses_prior_shape;
-  real<lower=0> mu_doses_prior_mean;
+  real<lower=0> mu_doses_prior_rate;
   vector<lower=0>[N_doses] mu_doses;
 
   real<lower=0> offset_cohort_births_shape;
-  real<lower=0> offset_cohort_births_mean;
+  real<lower=0> offset_cohort_births_rate;
 
   // all cohorts are present so the births must be greater than 1
   vector<lower=1.0>[N_cohort_births] offset_cohort_births;
@@ -109,8 +109,6 @@ parameters {
 transformed parameters{
 
   vector[N_years] coef_year = append_row(0, coef_year_raw);
-  real<lower=0> mu_doses_prior_rate = mu_doses_prior_shape / mu_doses_prior_mean;
-  real<lower=0> offset_cohort_births_rate = offset_cohort_births_shape / offset_cohort_births_mean;
 
 }
 
@@ -140,12 +138,12 @@ model {
 
   // priors
   // measurement error prior
-  mu_doses_prior_shape ~ gamma(10, 10.0/100.0);
-  mu_doses_prior_mean ~ gamma(10, 10.0/5.0);
+  mu_doses_prior_shape ~ gamma(20.0, 20.0/50.0);
+  mu_doses_prior_rate ~ gamma(10, 10.0/5.0);
   mu_doses ~ gamma(mu_doses_prior_shape, mu_doses_prior_rate);
 
-  offset_cohort_births_shape ~ gamma(10, 10.0/100.0);
-  offset_cohort_births_mean ~ gamma(100, 100.0/5000.0);
+  offset_cohort_births_shape ~ gamma(20.0, 20.0/50.0);
+  offset_cohort_births_rate ~ gamma(100, 100.0/5000.0);
   offset_cohort_births ~ gamma(offset_cohort_births_shape, offset_cohort_births_rate);
 
   // regression priors
@@ -170,7 +168,7 @@ model {
 
 generated quantities{
 
-  int<lower=0> y_pos_dis[N];
+  array[N] int<lower=0> y_pos_dis;
 
   real amplitude = sqrt(coef_month_c^2 + coef_month_s^2);
   real phase_shift_cos_months = atan2(coef_month_s, coef_month_c) * N_months / (2*pi());
@@ -201,7 +199,7 @@ generated quantities{
     real coef_age_s_prior = normal_rng(0, prior_in / sd_age_months);
     real coef_age_l_prior = normal_rng(0, prior_in / sd_age_months);
     vector[N] lp_prior;
-    int y_prior_dis[N];
+    array[N] int y_prior_dis;
     real coef_month_s_prior = normal_rng(0, prior_in);
     real coef_month_c_prior = normal_rng(0, prior_in);
     vector[N_cohort_births] coef_cohort_births_prior;

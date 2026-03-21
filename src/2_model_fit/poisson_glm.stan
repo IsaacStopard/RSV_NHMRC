@@ -1,7 +1,7 @@
 //
 functions{
 
-  vector lp_fun(int N, real intercept, real coef_inc_c, real coef_treat, vector mu_c, vector treatment, vector offset_weeks, int[] ind_week_year, vector coef_week_year){
+  vector lp_fun(int N, real intercept, real coef_inc_c, real coef_treat, vector mu_c, vector treatment, vector offset_weeks, array[] int ind_week_year, vector coef_week_year){
 
     vector[N] lp_out = log(offset_weeks) + intercept + coef_inc_c * mu_c ./ offset_weeks + coef_treat * treatment + coef_week_year[ind_week_year];
 
@@ -11,10 +11,10 @@ functions{
 
 data {
   int<lower=0> N;
-  int<lower=0> y_t[N];
-  int<lower=0> y_c[N];
+  array[N] int<lower=0> y_t;
+  array[N] int<lower=0> y_c;
   vector<lower=0>[N] treatment;
-  int<lower=1> ind_week_year[N];
+  array[N] int<lower=1> ind_week_year;
 
   int<lower=0> N_week_year;
   vector<lower=0>[N] offset_weeks;
@@ -31,8 +31,8 @@ data {
 
 parameters {
 
-  real<lower=0> mu_c_prior_shape;
-  real<lower=0> mu_c_prior_rate;
+  real<lower=0> mu_c_prior_mean;
+  real<lower=0> mu_c_prior_sd;
 
   vector<lower=0>[N] mu_c;
   real intercept;
@@ -48,6 +48,8 @@ transformed parameters{
 
   vector[N] lp_t = lp_fun(N, intercept, coef_inc_c, coef_treat, mu_c, treatment, offset_weeks, ind_week_year, coef_week_year);
 
+  real<lower=0> mu_c_prior_shape = square(mu_c_prior_mean) / square(mu_c_prior_sd);
+  real<lower=0> mu_c_prior_rate = mu_c_prior_mean / square(mu_c_prior_sd);
 }
 
 model{
@@ -55,8 +57,9 @@ model{
   y_t ~ poisson_log(lp_t);
 
   // measurement error prior
-  mu_c_prior_shape ~ gamma(2, 1);
-  mu_c_prior_rate ~ gamma(2, 4);
+  mu_c_prior_mean ~ gamma(100.0, 100.0 / 250.0);
+  mu_c_prior_sd ~ gamma(100.0, 100.0 / 50.0);
+
   mu_c ~ gamma(mu_c_prior_shape, mu_c_prior_rate);
 
   // regression priors
@@ -65,13 +68,13 @@ model{
   coef_treat ~ normal(0, prior_in);
 
   coef_week_year ~ normal(0, sigma_week_year);
-  sigma_week_year ~ exponential(10);
+  sigma_week_year ~ exponential(5);
 }
 
 generated quantities{
 
-  real<lower=0> irr_pos_dis[N];
-  int<lower=0> y_t_pos_dis[N];
+  array[N] real<lower=0> irr_pos_dis;
+  array[N] int<lower=0> y_t_pos_dis;
 
   real<lower=0> irr_treat;
   vector[N_gq] lp_treat_gq;
@@ -84,13 +87,13 @@ generated quantities{
   real coef_treat_prior = normal_rng(0, prior_in);
 
   vector[N] lp_t_prior;
-  int<lower=0> y_t_prior_dis[N];
+  array[N] int<lower=0> y_t_prior_dis;
 
   vector[1] week_year_prior;
   real sigma_week_year_prior;
   vector[1] week_pos_r;
 
-  sigma_week_year_prior = exponential_rng(10);
+  sigma_week_year_prior = exponential_rng(5);
   week_year_prior[1] = normal_rng(0, sigma_week_year_prior);
   week_pos_r[1] = normal_rng(0, sigma_week_year);
 
