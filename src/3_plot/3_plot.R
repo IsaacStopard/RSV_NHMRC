@@ -1083,6 +1083,65 @@ ggsave(
   device = "pdf"
 )
 
+# estimated effectiveness (predicated relative to 0% coverage)
+cf_0 <- cf_dose_off_independent[age_index,]
+cf_p <- cf_obs_independent[age_index,]
+
+cf_0_summed_matrix <- rowsum(cf_0, group = model_2_data_QLD$rsv_start_month[age_index], reorder = TRUE)
+cf_p_summed_matrix <- rowsum(cf_p, group = model_2_data_QLD$rsv_start_month[age_index], reorder = TRUE)
+
+model_1_IRR <- round(quantile(exp(fit_1$draws("coef_treat", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 2)
+
+model_1_eff <- round(quantile(1 - exp(fit_1$draws("coef_treat", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 2) * 100
+
+model_2_IRR <- round(quantile(colMeans(cf_p_summed_matrix[4:12,] / cf_0_summed_matrix[4:12,]), probs = probs_in), digits = 2)
+
+model_2_eff <- round(quantile(1 - colMeans(cf_p_summed_matrix[4:12,] / cf_0_summed_matrix[4:12,]), probs = probs_in), digits = 2) * 100
+
+pred_IRR <- apply(cf_p_summed_matrix / cf_0_summed_matrix, 1, quantile, probs = c(0.025, 0.5, 0.975)) |> t() |> as.data.frame() |>
+    rename("l" = 1, "m" = 2, "u" = 3) |>
+    mutate("rsv_start_month" = sort(unique(model_2_data_QLD$rsv_start_month[age_index])))
+
+pred_eff <- apply((1 - cf_p_summed_matrix / cf_0_summed_matrix) * 100, 1, quantile, probs = c(0.025, 0.5, 0.975)) |> t() |> as.data.frame() |>
+  rename("l" = 1, "m" = 2, "u" = 3) |>
+  mutate("rsv_start_month" = sort(unique(model_2_data_QLD$rsv_start_month[age_index])))
+
+extra_points <- data.frame(
+  x = c(pred_IRR[8, "rsv_start_month"] + 1.5, pred_IRR[8, "rsv_start_month"] - 1.5),
+  IRR_m = c(model_1_IRR[2], model_2_IRR[2]),
+  IRR_l = c(model_1_IRR[1], model_2_IRR[1]),
+  IRR_u = c(model_1_IRR[3], model_2_IRR[3]),
+  eff_m = c(model_1_eff[2], model_2_eff[2]),
+  eff_l = c(model_1_eff[1], model_2_eff[1]),
+  eff_u = c(model_1_eff[3], model_2_eff[3]),
+  model_name = c("model 1", "model 2")
+)
+
+ggplot(data = subset(pred_IRR, rsv_start_month >= "2024-04-01"),
+       aes(x = rsv_start_month, ymin = l, y = m, ymax = u)) +
+  geom_ribbon(alpha = 0.175) +
+  geom_pointrange(data = extra_points,
+                  aes(x = x, y = IRR_m, ymin = IRR_l, ymax = IRR_u, colour = model_name),
+                  size = 1) +
+  geom_line(linewidth = 1) +
+  scale_colour_manual(name = "", values = c("model 1" = "skyblue", "model 2" = "#0072B2")) +
+  scale_y_continuous(limits = c(0.25, 1.15), breaks = seq(0.3, 1.1, 0.1)) +
+  ylab("Incidence rate ratio of Nirsevimab treatment") +
+  xlab("Month") +
+  ggplot(data = subset(pred_eff, rsv_start_month >= "2024-04-01"),
+         aes(x = rsv_start_month, ymin = l, y = m, ymax = u)) +
+  geom_ribbon(alpha = 0.175) +
+  geom_line(size = 1) +
+  geom_pointrange(data = extra_points,
+                 aes(x = x, y = eff_m, ymin = eff_l, ymax = eff_u, colour = model_name),
+                 size = 1) +
+  scale_colour_manual(name = "", values = c("model 1" = "skyblue", "model 2" = "#0072B2")) +
+  scale_y_continuous(limits = c(-15, 80), breaks = seq(-10, 80, 10)) +
+  ylab("Percent reduction in the monthly cases predicted\nwith the observed coverages relative the 0% counterfactual") +
+  xlab("Month") +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = c("a"))
+
 ##############################
 ##### model coefficients #####
 ##############################
