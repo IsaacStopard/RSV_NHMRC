@@ -3,12 +3,16 @@ library(tidyverse)
 
 orderly::orderly_dependency("1_data_cleaning", "latest()",
                             c("QLD_model_1_data_in.rds",
+                              "ACT_model_1_data_in.rds",
+                              "NSW_model_1_data_in.rds",
                               "model_3_data_in.rds",
                               "model_2_data_ACT_in.rds",
                               "model_2_data_NSW_in.rds",
                               "model_2_data_QLD_in.rds"))
 
 QLD_model_1_data_in <- readRDS(file = "QLD_model_1_data_in.rds")
+ACT_model_1_data_in <- readRDS(file = "ACT_model_1_data_in.rds")
+NSW_model_1_data_in <- readRDS(file = "NSW_model_1_data_in.rds")
 
 model_3_data_in <- readRDS(file = "model_3_data_in.rds")
 model_2_data_ACT_in <- readRDS(file = "model_2_data_ACT_in.rds")
@@ -32,6 +36,26 @@ fit_1 <- model_1$sample(data = QLD_model_1_data_in,
                         parallel_chains = 4)
 
 fit_1$save_object(file = "fit_1.rds")
+
+fit_1_ACT <- model_1$sample(data = ACT_model_1_data_in,
+                            seed = 123,
+                            iter_sampling = round(n_iter/2),
+                            iter_warmup = round(n_iter/2),
+                            chains = 4,
+                            init = 2,
+                            parallel_chains = 4)
+
+fit_1_ACT$save_object(file = "fit_1_ACT.rds")
+
+fit_1_NSW <- model_1$sample(data = NSW_model_1_data_in,
+                            seed = 123,
+                            iter_sampling = round(n_iter/2),
+                            iter_warmup = round(n_iter/2),
+                            chains = 4,
+                            init = 2,
+                            parallel_chains = 4)
+
+fit_1_NSW$save_object(file = "fit_1_NSW.rds")
 
 ###################
 ##### model 2 #####

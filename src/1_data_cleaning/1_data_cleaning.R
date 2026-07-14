@@ -126,8 +126,8 @@ colnames(df_QLD) <- c("case_number", "date_of_rsv_episode", "week_of_rsv_episode
                       "statistical_area_level_2_of_residence",
                       "age_in_weeks_at_time_of_rsv_episode", "age_in_months_at_time_of_rsv_episode",
                       "age_in_weeks_at_time_of_program_rollout", "age_in_months_at_time_of_program_rollout",
-                      "age_6_months_groups_at_time_of_rsv_episode", "binary_age_groups_less_than_6m_vs_geq_6m_at_time_of_rsv_episode", "running_count_of_weekly_incidence", "cumulative_count_of_weekly_incidence", "running_count_of_weekly_incidence_by_age_group",
-                      "cumulative_count_of_weekly_incidence_by_age_group")
+                      "age_6_months_groups_at_time_of_rsv_episode", "binary_age_groups_less_than_6m_vs_geq_6m_at_time_of_rsv_episode", "running_count_of_weekly_notifications", "cumulative_count_of_weekly_notifications", "running_count_of_weekly_notifications_by_age_group",
+                      "cumulative_count_of_weekly_notifications_by_age_group")
 
 min_date <- min(df_QLD$date_of_rsv_episode)
 max_date <- max(df_QLD$date_of_rsv_episode)
@@ -224,7 +224,7 @@ obs_combs <- rbind(df_QLD |> summarise(inc = n(), .by = c(state, cohort_birth_st
                    )
 
 if(sum(obs_combs$inc) != (total_ACT + total_NSW + total_QLD)){
-  stop("incorrect total incidence in obs_combs")
+  stop("incorrect total notifications in obs_combs")
 }
 
 model_2_data <- left_join(full_combs,
@@ -248,7 +248,7 @@ if(sum(model_2_data$inc, na.rm = TRUE) != (total_ACT + total_NSW + total_QLD) |
    sum(subset(model_2_data, state == "ACT")$inc) != total_ACT |
    sum(subset(model_2_data, state == "NSW")$inc) != total_NSW |
    sum(subset(model_2_data, state == "QLD")$inc) != total_QLD){
-  stop("incorrect incidence in model_2_data")
+  stop("incorrect notifications in model_2_data")
 }
 
 # checking cohorts are the same in birth and notification datasets
@@ -479,30 +479,43 @@ model_2_data_QLD_in <- data_in_individual_state_fun(model_2_data_QLD, QLD_births
 saveRDS(model_2_data_QLD_in, "model_2_data_QLD_in.rds")
 
 # checks
-if(sum(model_3_data_in$y) != sum(c(model_2_data_ACT_in$y, model_2_data_NSW_in$y, model_2_data_QLD_in$y))){stop("data_in incidence not correct")}
+if(sum(model_3_data_in$y) != sum(c(model_2_data_ACT_in$y, model_2_data_NSW_in$y, model_2_data_QLD_in$y))){stop("data_in notifications not correct")}
 if(sum(model_3_data_in$dose_data) != sum(c(model_2_data_ACT_in$dose_data, model_2_data_NSW_in$dose_data, model_2_data_QLD_in$dose_data))){stop("data_in doses not correct")}
 
-###################################
-##### Queensland data format ######
-###################################
-
+########################
 ##### model 1 data #####
+########################
 
-QLD_model_1_data <- df_QLD |> mutate() |> group_by(week, year, week_year, age_group, treatment) |> summarise(inc = n()) |> ungroup()
+##### Queensland data ######
+
+#QLD_model_1_data <- df_QLD |> group_by(week, year, week_year, age_group, treatment) |> summarise(inc = n()) |> ungroup()
+
+QLD_model_1_data <- df_QLD |> mutate(epi_week = epiweek(date_of_rsv_episode), epi_year = epiyear(date_of_rsv_episode)) |>
+  summarise(inc = n(), .by = c(epi_week, epi_year, age_group))
 
 if(sum(QLD_model_1_data$inc) != total_QLD){
   stop("QLD_model_1_data_inc is not correct")
 }
 
-QLD_model_1_data <- left_join(QLD_model_1_data,
-                              data.frame("date" = seq(min_date, max_date, by = "days")) |>
-                                mutate(week = week(date), year = year(date)) |>
-                                group_by(week, year) |> summarise(offset_week = n())
-                              )
+epi_weeks_df <- data.frame(
+  date = seq(ymd("2023-01-01"), ymd("2024-12-31"), by = "day")
+) |> mutate(
+  epi_year = epiyear(date),
+  epi_week = epiweek(date)
+  ) |> summarise(offset_week = n(), .by = c(epi_week, epi_year)) |>
+  mutate(week_cont = row_number(),
+         week_year = paste0(epi_week,"-",epi_year),
+         treatment = if_else(as.Date(paste(epi_year, epi_week, "0", sep = "-"), "%Y-%U-%w") >= as.Date("2024-04-08", format = "%Y-%m-%d"), 1, 0))
 
-QLD_model_1_data <- QLD_model_1_data |> left_join(unique(QLD_model_1_data[,c("week", "year", "week_year")]) |>
-                                                    arrange(year, week) |> ungroup() |>
-                                                    mutate(week_cont = row_number()))
+# QLD_model_1_data <- left_join(QLD_model_1_data,
+#                               data.frame("date" = seq(min_date, max_date, by = "days")) |>
+#                                 mutate(week = week(date), year = year(date)) |>
+#                                 group_by(week, year) |> summarise(offset_week = n())
+#                               )
+
+QLD_model_1_data <- epi_weeks_df |>
+  left_join(QLD_model_1_data, by = c("epi_week", "epi_year"))
+  #left_join(unique(QLD_model_1_data[,c("week", "year", "week_year")]) |> arrange(year, week) |> ungroup() |> mutate(week_cont = row_number()))
 
 QLD_model_1_data <- QLD_model_1_data |>
   pivot_wider(names_from = age_group, values_from = inc) |>
@@ -512,12 +525,7 @@ QLD_model_1_data <- QLD_model_1_data |>
 
 # checking the total infections are still correct
 if(total_QLD != (sum(QLD_model_1_data$inc_greater_8m) + sum(QLD_model_1_data$inc_less_8m))){
-  stop("QLD_model_1_data incidence not correct")
-}
-
-# checking all weeks and years have data
-if(nrow(unique(df_QLD[,c("week", "year")])) != nrow(expand.grid(week = unique(df_QLD$week), year = unique(df_QLD$year)))){
-  stop("not all weeks and years in df_QLD have data")
+  stop("QLD_model_1_data notifications not correct")
 }
 
 saveRDS(QLD_model_1_data, file = "QLD_model_1_data.rds")
@@ -537,6 +545,85 @@ QLD_model_1_data_in <- list("N" = nrow(QLD_model_1_data),
                             "sd_y_c" = sd(QLD_model_1_data$inc_greater_8m))
 
 saveRDS(QLD_model_1_data_in, file = "QLD_model_1_data_in.rds")
+
+if(sum(model_2_data_QLD$inc) != (sum(QLD_model_1_data$inc_less_8m) + sum(QLD_model_1_data$inc_greater_8m))){
+  stop("QLD model 1 and 2 notifications are not equal")
+}
+
+##### ACT data #####
+ACT_model_1_data <- epi_weeks_df |>
+  left_join(df_ACT |> mutate(epi_week = epiweek(episode_date),
+                             epi_year = epiyear(episode_date),
+    age_group = if_else(age_rsv_months >= 6, "inc_greater_6m", "inc_less_6m")) |>
+              summarise(inc = n(), .by = c(epi_week, epi_year, age_group)) |>
+              pivot_wider(values_from = inc, names_from = age_group), by = c("epi_week", "epi_year")) |>
+  replace_na(list("inc_less_6m" = 0, "inc_greater_6m" = 0))
+
+if((sum(ACT_model_1_data$inc_greater_6m) + sum(ACT_model_1_data$inc_less_6m)) != nrow(df_ACT)){
+  stop("notifications in ACT_model_1_data does not sum correctly")
+}
+
+if(nrow(unique(ACT_model_1_data[,c("epi_week", "epi_year")])) != nrow(QLD_model_1_data)){
+  stop("not all weeks and years have data in ACT_model_1_data")
+}
+
+saveRDS(ACT_model_1_data, file = "ACT_model_1_data.rds")
+
+ACT_model_1_data_in <- list("N" = nrow(ACT_model_1_data),
+                            "y_t" = as.integer(ACT_model_1_data$inc_less_6m),
+                            "y_c" = as.integer(ACT_model_1_data$inc_greater_6m),
+                            "treatment" = as.integer(ACT_model_1_data$treatment),
+                            "offset_weeks" = ACT_model_1_data$offset_week,
+                            "mu_c_gq" = 1:max(ACT_model_1_data$inc_greater_6m),
+                            "offset_weeks_gq" = rep(7, max(ACT_model_1_data$inc_greater_6m)),
+                            "N_gq" = max(ACT_model_1_data$inc_greater_6m),
+                            "treatment_gq" = rep(1, max(ACT_model_1_data$inc_greater_6m)),
+                            "ind_week_year" = as.integer(ACT_model_1_data$week_cont),
+                            "N_week_year" = length(sort(unique(ACT_model_1_data$week_cont))),
+                            "prior_in" = 1.5,
+                            "sd_y_c" = sd(ACT_model_1_data$inc_greater_6m))
+
+saveRDS(ACT_model_1_data_in, "ACT_model_1_data_in.rds")
+
+if(sum(model_2_data_ACT$inc) != (sum(ACT_model_1_data$inc_less_6m) + sum(ACT_model_1_data$inc_greater_6m))){
+  stop("ACT model 1 and 2 notifications are not equal")
+}
+
+##### NSW data #####
+
+NSW_model_1_data <-
+  epi_weeks_df |> left_join(
+    read_excel(path = "NSW/RSV notifications and hospitalisations 2023-2024_20250923.xlsx", sheet = 1, .name_repair = "universal")[1:210,] |>
+      select(Epi.week, Age.group, Total.notifications) |>
+      rename("inc" = Total.notifications, "age_group" = Age.group, "week_year" = Epi.week) |>
+      mutate(age_group = ifelse(age_group == "0-<6mths", "inc_less_6m", "inc_greater_6m")) |>
+      separate_wider_delim(week_year, delim = "-", names = c("epi_week", "epi_year"), cols_remove = FALSE) |>
+      mutate(epi_week = as.numeric(epi_week), epi_year = as.numeric(epi_year)) |>
+      pivot_wider(values_from = inc, names_from = age_group),
+  by = c("epi_week", "epi_year", "week_year")
+  )
+
+if(sum(model_2_data_NSW$inc) != (sum(NSW_model_1_data$inc_less_6m) + sum(NSW_model_1_data$inc_greater_6m))){
+  print("NSW model 1 and 2 notifications are not equal")
+}
+
+saveRDS(NSW_model_1_data, file = "NSW_model_1_data.rds")
+
+NSW_model_1_data_in <- list("N" = nrow(NSW_model_1_data),
+                            "y_t" = as.integer(NSW_model_1_data$inc_less_6m),
+                            "y_c" = as.integer(NSW_model_1_data$inc_greater_6m),
+                            "treatment" = as.integer(NSW_model_1_data$treatment),
+                            "offset_weeks" = NSW_model_1_data$offset_week,
+                            "mu_c_gq" = 1:max(NSW_model_1_data$inc_greater_6m),
+                            "offset_weeks_gq" = rep(7, max(NSW_model_1_data$inc_greater_6m)),
+                            "N_gq" = max(NSW_model_1_data$inc_greater_6m),
+                            "treatment_gq" = rep(1, max(NSW_model_1_data$inc_greater_6m)),
+                            "ind_week_year" = as.integer(NSW_model_1_data$week_cont),
+                            "N_week_year" = length(sort(unique(NSW_model_1_data$week_cont))),
+                            "prior_in" = 1.5,
+                            "sd_y_c" = sd(NSW_model_1_data$inc_greater_6m))
+
+saveRDS(NSW_model_1_data_in, file = "NSW_model_1_data_in.rds")
 
 ################################
 ##### QLD old model 2 data #####
@@ -560,7 +647,7 @@ saveRDS(QLD_model_1_data_in, file = "QLD_model_1_data_in.rds")
 #          offset_months = days_in_month(rsv_start_month)) |>
 #   filter(age_rsv_months >= 0 & age_rsv_months <= (6 * 12)) # only includes data for those equal to or less than 5 years old
 #
-# if(sum(QLD_model_2_data$inc) != nrow(df_QLD)){stop("incidence sum in model 2 not correct")}
+# if(sum(QLD_model_2_data$inc) != nrow(df_QLD)){stop("notifications sum in model 2 not correct")}
 #
 # max(QLD_model_2_data$age_rsv_months)
 #

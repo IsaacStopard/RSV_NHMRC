@@ -9,6 +9,8 @@ theme_set(theme_bw() +
 
 orderly::orderly_dependency("1_data_cleaning", "latest()",
                             c("QLD_model_1_data.rds",
+                              "ACT_model_1_data.rds",
+                              "NSW_model_1_data.rds",
                               "model_2_data_all.rds",
                               "model_2_data_ACT.rds",
                               "model_2_data_NSW.rds",
@@ -16,6 +18,8 @@ orderly::orderly_dependency("1_data_cleaning", "latest()",
                               "dose_df.rds",
                               "dose_df_sum_age_months_long.rds",
                               "QLD_model_1_data_in.rds",
+                              "ACT_model_1_data_in.rds",
+                              "NSW_model_1_data_in.rds",
                               "model_3_data_in.rds",
                               "model_2_data_ACT_in.rds",
                               "model_2_data_NSW_in.rds",
@@ -27,6 +31,8 @@ orderly::orderly_dependency("1_data_cleaning", "latest()",
 
 orderly::orderly_dependency("2_model_fit", "latest()",
                             c("fit_1.rds",
+                              "fit_1_ACT.rds",
+                              "fit_1_NSW.rds",
                               "fit_2_ACT.rds",
                               "fit_2_NSW.rds",
                               "fit_2_QLD.rds",
@@ -39,6 +45,11 @@ QLD_births <- readRDS(file = "QLD_births.rds")
 
 QLD_model_1_data <- readRDS(file = "QLD_model_1_data.rds")
 QLD_model_1_data_in <- readRDS(file = "QLD_model_1_data_in.rds")
+ACT_model_1_data <- readRDS(file = "ACT_model_1_data.rds")
+ACT_model_1_data_in <- readRDS(file = "ACT_model_1_data_in.rds")
+NSW_model_1_data <- readRDS(file = "NSW_model_1_data.rds")
+NSW_model_1_data_in <- readRDS(file = "NSW_model_1_data_in.rds")
+
 model_2_data_ACT <- readRDS(file = "model_2_data_ACT.rds")
 model_2_data_ACT_in <- readRDS(file = "model_2_data_ACT_in.rds")
 model_2_data_NSW <- readRDS(file = "model_2_data_NSW.rds")
@@ -52,6 +63,8 @@ dose_df <- readRDS(file = "dose_df.rds")
 dose_df_sum_age_months_long <- readRDS(file = "dose_df_sum_age_months_long.rds")
 
 fit_1 <- readRDS(file = "fit_1.rds")
+fit_1_ACT <- readRDS(file = "fit_1_ACT.rds")
+fit_1_NSW <- readRDS(file = "fit_1_NSW.rds")
 fit_2_ACT <- readRDS(file = "fit_2_ACT.rds")
 fit_2_NSW <- readRDS(file = "fit_2_NSW.rds")
 fit_2_QLD <- readRDS(file = "fit_2_QLD.rds")
@@ -77,11 +90,22 @@ dose_sum_age_months_long <- dose_df_sum_age_months_long |>
 
 doses_model_1 <- dose_sum_age_months_long |>
   filter(state == "QLD") |> mutate(age_group = ifelse(age_months <= 8, "<=8 months", ifelse(age_months <= 24, "8-24 months", ">24 months"))) |>
-  filter(year <= max(QLD_model_1_data$year)) |> group_by(age_group) |>
-  summarise(QLD = sum(doses)) |>
+  filter(year <= max(model_2_data_QLD$year)) |>
+  summarise(QLD = sum(doses), .by = c(age_group)) |>
   mutate(prop = QLD / sum(QLD))
 
 sum(doses_model_1$QLD)
+
+doses_model_1_ACT_NSW <- dose_sum_age_months_long |>
+  filter(state != "QLD") |> mutate(age_group = ifelse(age_months < 6, "<6 months", ifelse(age_months <= 24, "6-24 months", ">24 months"))) |>
+  filter(year <= max(model_2_data_QLD$year)) |>
+  summarise(doses = sum(doses), .by = c(age_group, state))
+
+doses_model_1_ACT_NSW |> filter(state == "NSW") |> mutate(prop = doses / sum(doses))
+sum(subset(doses_model_1_ACT_NSW, state == "NSW")$doses)
+
+doses_model_1_ACT_NSW |> filter(state == "ACT") |> mutate(prop = doses / sum(doses))
+sum(subset(doses_model_1_ACT_NSW, state == "ACT")$doses)
 
 ##### models 2 and 3
 ### variables with uncertainty
@@ -177,30 +201,58 @@ ggsave(
 
 probs_in <- c(0.025, 0.5, 0.975)
 
-irr_pos_dis <- fit_1$summary("irr_pos_dis", extra_quantiles = ~posterior::quantile2(., probs = probs_in))[,2:4] |>
+irr_fun <- function(fit, model_1_data){
+  fit$summary("irr_pos_dis", extra_quantiles = ~posterior::quantile2(., probs = probs_in))[,2:4] |>
   as.data.frame() |>
-  mutate(week = QLD_model_1_data$week,
-         year = QLD_model_1_data$year,
-         treatment = QLD_model_1_data$treatment,
-         week_year = QLD_model_1_data$week_year,
-         week_cont = QLD_model_1_data$week_cont) |>
+  mutate(week = model_1_data$epi_week,
+         year = model_1_data$epi_year,
+         treatment = model_1_data$treatment,
+         week_year = model_1_data$week_year,
+         week_cont = model_1_data$week_cont) |>
   rename("l" = 1, "m" = 2, "u" = 3)
+}
+
+irr_pos_dis <- irr_fun(fit_1, QLD_model_1_data)
+irr_pos_dis_ACT <- irr_fun(fit_1_ACT, ACT_model_1_data)
+irr_pos_dis_NSW <- irr_fun(fit_1_NSW, NSW_model_1_data)
 
 QLD_model_1_data <- QLD_model_1_data |>
   bind_cols(fit_1$summary("y_t_pos_dis", extra_quantiles = ~posterior::quantile2(., probs = probs_in))[,2:4] |>
               rename("y_t_pos_l" = 1, "y_t_pos_m" = 2, "y_t_pos_u" = 3))
 
-intercepts <- fit_1$draws("intercept", format = "draws_matrix") |> as.vector()
-re_week_year <- fit_1$draws("coef_week_year", format = "draws_matrix") |> as.matrix()
-coef_inc_c <- fit_1$draws("coef_inc_c", format = "draws_matrix") |> as.vector()
-coef_treat <- fit_1$draws("coef_treat", format = "draws_matrix") |> as.vector()
+ACT_model_1_data <- ACT_model_1_data |>
+  bind_cols(fit_1_ACT$summary("y_t_pos_dis", extra_quantiles = ~posterior::quantile2(., probs = probs_in))[,2:4] |>
+              rename("y_t_pos_l" = 1, "y_t_pos_m" = 2, "y_t_pos_u" = 3))
 
-ind_week_year = sort(unique(QLD_model_1_data$week_cont))
+NSW_model_1_data <- NSW_model_1_data |>
+  bind_cols(fit_1_NSW$summary("y_t_pos_dis", extra_quantiles = ~posterior::quantile2(., probs = probs_in))[,2:4] |>
+              rename("y_t_pos_l" = 1, "y_t_pos_m" = 2, "y_t_pos_u" = 3))
 
-mu_gq_df <- expand.grid(mu_c = seq(1, max(QLD_model_1_data$inc_greater_8m), 3),
-                        treatment = c(0, 1))
+ACT_model_1_data$IRR <- ACT_model_1_data$inc_less_6m / ACT_model_1_data$inc_greater_6m
+NSW_model_1_data$IRR <- NSW_model_1_data$inc_less_6m / NSW_model_1_data$inc_greater_6m
 
-pred <- lapply(1:nrow(mu_gq_df),
+QLD_model_1_data <- QLD_model_1_data |> rename("inc_less" = inc_less_8m, "inc_greater" = inc_greater_8m)
+ACT_model_1_data <- ACT_model_1_data |> rename("inc_less" = inc_less_6m, "inc_greater" = inc_greater_6m)
+NSW_model_1_data <- NSW_model_1_data |> rename("inc_less" = inc_less_6m, "inc_greater" = inc_greater_6m)
+
+model_1_data_all <- rbind(QLD_model_1_data |> mutate(state = "QLD"),
+                          ACT_model_1_data |> mutate(state = "ACT"),
+                          NSW_model_1_data |> mutate(state = "NSW"))
+
+
+
+mu_gq_df_QLD <- expand.grid(mu_c = seq(1, max(QLD_model_1_data$inc_greater), 3), treatment = c(0, 1))
+mu_gq_df_ACT <- expand.grid(mu_c = seq(1, max(ACT_model_1_data$inc_greater), 1), treatment = c(0, 1))
+mu_gq_df_NSW <- expand.grid(mu_c = seq(1, max(NSW_model_1_data$inc_greater), 5), treatment = c(0, 1))
+
+mu_pred_coef_fun <- function(mu_gq_df, fit){
+
+  intercepts <- fit$draws("intercept", format = "draws_matrix") |> as.vector()
+  re_week_year <- fit$draws("coef_week_year", format = "draws_matrix") |> as.matrix()
+  coef_inc_c <- fit$draws("coef_inc_c", format = "draws_matrix") |> as.vector()
+  coef_treat <- fit$draws("coef_treat", format = "draws_matrix") |> as.vector()
+
+  pred <- lapply(1:nrow(mu_gq_df),
        function(i, mu_gq_df){
          out <- quantile(rowMeans(exp(t(log(7) +
                                           rep(1, ncol(re_week_year)) %o% (coef_inc_c * mu_gq_df[i, "mu_c"]/7 + coef_treat * mu_gq_df[i, "treatment"] + intercepts)
@@ -212,9 +264,9 @@ pred <- lapply(1:nrow(mu_gq_df),
        mu_gq_df = mu_gq_df
        ) |> bind_rows() |> as.data.frame()
 
-rownames(pred) <- NULL
+  rownames(pred) <- NULL
 
-coef_df <- cbind(data.frame("coef" = c("alpha", "beta_1", "beta_2", "c")),
+  coef_df <- cbind(data.frame("coef" = c("alpha", "beta_1", "beta_2", "c")),
                  rbind(quantile(intercepts, probs = probs_in),
                        quantile(coef_inc_c, probs = probs_in),
                        quantile(coef_treat, probs = probs_in),
@@ -222,8 +274,21 @@ coef_df <- cbind(data.frame("coef" = c("alpha", "beta_1", "beta_2", "c")),
                    as.data.frame() |> rename("l" = 1, "m" = 2, "u" = 3)
                  )
 
-fit_plots <-
-  ggplot(data = QLD_model_1_data, aes(x = week_cont, y = inc_less_8m, fill = factor(treatment))) +
+  return(list("mu_pred" = cbind(mu_gq_df, pred),
+              "coef_df" = coef_df))
+}
+
+mu_pred_coef_QLD <- mu_pred_coef_fun(mu_gq_df_QLD, fit_1)
+mu_pred_coef_ACT <- mu_pred_coef_fun(mu_gq_df_ACT, fit_1_ACT)
+mu_pred_coef_NSW <- mu_pred_coef_fun(mu_gq_df_NSW, fit_1_NSW)
+
+inf_inds <- which(model_1_data_all$inc_greater == 0)
+model_1_data_all[inf_inds, "state"]
+model_1_data_all[inf_inds, "week_cont"]
+
+fit_plots_inc_y <-
+  ggplot(data = model_1_data_all,
+         aes(x = week_cont, y = inc_less, fill = factor(treatment), group = interaction(state, week_cont))) +
   geom_bar(stat = "identity", col = "grey30") +
   geom_pointrange(aes(x = week_cont, y = y_t_pos_m, ymin = y_t_pos_l, ymax = y_t_pos_u,
                       fill = factor(treatment)),
@@ -232,87 +297,125 @@ fit_plots <-
   theme(legend.position = c(0.8, 0.8)) +
   scale_fill_manual(values = c("grey70", "skyblue"), name = "Nirsevimab\ndistribution",
                     labels = c("No", "Yes")) +
-  xlab("Week-Year") + ylab("Incidence in those\n8 months old and under") +
-  scale_y_continuous(limits = c(0, 700), breaks = seq(0, 700, 100)) +
-  scale_x_continuous(labels = arrange(subset(QLD_model_1_data, week_cont %in% seq(1, 105, 10)), week_cont) |> select(week_year) |> as.vector() |> unlist(), breaks = seq(1, 105, 10)) +
+  xlab("Epiweek-Epiyear") + ylab("Notifications in the younger age-groups") +
+  scale_x_continuous(labels = arrange(subset(QLD_model_1_data, week_cont %in% seq(1, 105, 20)), week_cont) |>
+                       select(week_year) |> as.vector() |> unlist(), breaks = seq(1, 105, 20)) +
+  facet_wrap(~state, scales = "free_y", nrow = 3)
 
-ggplot(data = QLD_model_1_data, aes(x = week_cont, y = inc_greater_8m)) +
+fit_plots_inc_o <- ggplot(data = model_1_data_all, aes(x = week_cont, y = inc_greater)) +
   geom_bar(stat = "identity", col = "grey30", fill = "grey70") +
-  xlab("Week-Year") + ylab("Incidence in those\nolder than 8-months") +
-  scale_y_continuous(limits = c(0, 700), breaks = seq(0, 700, 100)) +
-  scale_x_continuous(labels = arrange(subset(QLD_model_1_data, week_cont %in% seq(1, 105, 10)), week_cont) |> select(week_year) |> as.vector() |> unlist(), breaks = seq(1, 105, 10)) +
+  xlab("Epiweek-Epiyear") + ylab("Notifications in the older age-groups") +
+  scale_x_continuous(labels = arrange(subset(QLD_model_1_data, week_cont %in% seq(1, 105, 20)), week_cont) |> select(week_year) |> as.vector() |> unlist(),
+                     breaks = seq(1, 105, 20)) +
+  facet_wrap(~state, nrow = 3, scales = "free_y")
 
-ggplot(data = QLD_model_1_data,
-         aes(x = week_cont, y = inc_less_8m / inc_greater_8m, col = factor(treatment),
+fit_plots_IRR <- ggplot(data = model_1_data_all[-inf_inds,],
+         aes(x = week_cont, y = inc_less / inc_greater, col = factor(treatment),
              fill = factor(treatment))) +
   geom_bar(stat = "identity", position = position_dodge(), col = "grey30") +
   theme(legend.position = c(0.8, 0.8)) +
-  xlab("Week-Year") + ylab("Incidence rate ratio of [0, 8]\nmonth olds relative to older ages") +
-  geom_pointrange(data = irr_pos_dis,
+  xlab("Epiweek-Epiyear") + ylab("Notification rate ratio of younger relative to older ages") +
+  geom_pointrange(data = rbind(irr_pos_dis |> mutate(state = "QLD"),
+                               irr_pos_dis_ACT |> mutate(state = "ACT") |> filter(!week_cont %in% model_1_data_all[inf_inds, "week_cont"][[1]]),
+                               irr_pos_dis_NSW |> mutate(state = "NSW")),
                   aes(x = week_cont, y = m, ymin = l, ymax = u, fill = factor(treatment)),
                   inherit.aes = FALSE,
                   shape = 21, col = "grey30",
                   size = 0.7, alpha = 0.7) +
   scale_fill_manual(values = c("grey70", "skyblue"), name = "Nirsevimab\ndistribution",
                     labels = c("No", "Yes")) +
-  scale_x_continuous(labels = arrange(subset(QLD_model_1_data, week_cont %in% seq(1, 105, 10)), week_cont) |> select(week_year) |> as.vector() |> unlist(), breaks = seq(1, 105, 10)) +
+  scale_x_continuous(labels = arrange(subset(QLD_model_1_data, week_cont %in% seq(1, 105, 20)), week_cont) |> select(week_year) |> as.vector() |> unlist(),
+                     breaks = seq(1, 105, 20)) +
+  facet_wrap(~state, scales = "free_y", nrow = 3)
 
-  ggplot(data = QLD_model_1_data, aes(x = inc_less_8m, y = y_t_pos_m, ymin = y_t_pos_l,
-                                      ymax = y_t_pos_u, col = factor(treatment), shape = factor(year))) +
+model_1_actual_fitted <- ggplot(data = model_1_data_all, aes(x = inc_less, y = y_t_pos_m, ymin = y_t_pos_l,
+                                      ymax = y_t_pos_u, col = factor(treatment))) +
   geom_pointrange(size = 0.7) +
   geom_abline(slope = 1, intercept = 0, linetype = 2) +
-  theme(legend.position = c(0.3, 0.8), legend.direction = "horizontal") +
-  xlab("Sampled incidence in those\n8 months old and under") +
-  ylab("Predicted incidence in\nthose 8 months old and under") +
+  theme(legend.position = c(0.1, 0.9), legend.direction = "horizontal") +
+  xlab("Sampled notifications in the younger age-group") +
+  ylab("Predicted notifications in the younger age-group") +
   scale_colour_manual(values = c("grey70", "skyblue"), name = "Nirsevimab\ndistribution",
                     labels = c("No", "Yes")) +
-  scale_shape_manual(values = c(15, 16), name = "year") +
+  scale_shape_manual(values = c(15, 16, 17), name = "State") +
+  facet_wrap(~state, scales = "free")
 
-  ggplot(data = cbind(mu_gq_df, pred), aes(x = mu_c, y = m, ymin = l, ymax = u, fill = factor(treatment))) +
+mu_pred_m1 <- ggplot(data = rbind(mu_pred_coef_QLD$mu_pred |> mutate(state = "QLD"),
+                    mu_pred_coef_ACT$mu_pred |> mutate(state = "ACT"),
+                    mu_pred_coef_NSW$mu_pred |> mutate(state = "NSW")),
+       aes(x = mu_c, y = m, ymin = l, ymax = u, fill = factor(treatment))) +
   geom_ribbon(alpha = 0.7) +
-  ylab("Weekly incidence in\nthose 8 months old and under") +
+  ylab("Weekly notifications in the younger age-groups") +
   geom_point(inherit.aes = FALSE,
-             data = QLD_model_1_data,
-             aes(x = inc_greater_8m, y = inc_less_8m, fill = factor(treatment)),
+             data = model_1_data_all,
+             aes(x = inc_greater, y = inc_less, fill = factor(treatment)),
              size = 3, shape = 21,
              col = "grey30") +
-  theme(legend.position = c(0.3, 0.75)) +
-  geom_line(aes(col = factor(treatment)), linewidth = 1) +
-  xlab("Weekly incidence in those\nolder than 8 months") +
+  theme(legend.position = "none") +
+  geom_line(aes(col = factor(treatment)), size = 1) +
+  xlab("Weekly notifications in the older age-groups") +
   scale_colour_manual(values = c("grey70", "skyblue"), name = "Nirsevimab\ndistribution",
                       labels = c("No", "Yes")) +
   scale_fill_manual(values = c("grey70", "skyblue"), name = "Nirsevimab\ndistribution",
                     labels = c("No", "Yes")) +
+  facet_wrap(~state, scales = "free", nrow = 3)
 
-  ggplot(data = coef_df, aes(x = coef, y = m, ymin = l, ymax = u)) +
-  geom_pointrange(alpha = 0.5) +
-  ylab("Fitted parameter value") +
-  xlab("Parameter") +
-  scale_x_discrete(labels = c("alpha" = parse(text = "alpha"),
-                              "beta_1" = parse(text = "beta[1]"),
-                              "beta_2" = parse(text = "beta[2]"),
-                              "c" = parse(text = "c"))) +
-  geom_hline(yintercept = 0, linetype = 2) +
-  scale_y_continuous(limits = c(-0.75, 1.75), breaks = seq(-0.5, 1.5, 0.5)) +
+  # ggplot(data = coef_df, aes(x = coef, y = m, ymin = l, ymax = u)) +
+  # geom_pointrange(alpha = 0.5) +
+  # ylab("Fitted parameter value") +
+  # xlab("Parameter") +
+  # scale_x_discrete(labels = c("alpha" = parse(text = "alpha"),
+  #                             "beta_1" = parse(text = "beta[1]"),
+  #                             "beta_2" = parse(text = "beta[2]"),
+  #                             "c" = parse(text = "c"))) +
+  # geom_hline(yintercept = 0, linetype = 2) +
+  # scale_y_continuous(limits = c(-0.75, 1.75), breaks = seq(-0.5, 1.5, 0.5))
 
-  plot_annotation(tag_levels = "a") +
-  plot_layout(nrow = 2, ncol = 3)
-
-ggsave(plot = fit_plots,
+ggsave(plot = fit_plots_inc_y + fit_plots_inc_o + fit_plots_IRR + mu_pred_m1 +
+         plot_annotation(tag_levels = "a") +
+         plot_layout(nrow = 1, ncol = 4, guides = "collect"),
        filename = "model_1_plots.pdf",
-       height = 25,
-       width = 55,
+       height = 20,
+       width = 50,
        units = "cm",
        device = "pdf")
 
+ggsave(model_1_actual_fitted,
+       filename = "model_1_actual_fitted.pdf",
+       height = 15,
+       width = 35,
+       units = "cm",
+       device = "pdf")
 
 round(quantile(exp(fit_1$draws("coef_inc_c", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 3)
+round(quantile(exp(fit_1_ACT$draws("coef_inc_c", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 3)
+round(quantile(exp(fit_1_NSW$draws("coef_inc_c", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 3)
 
 round(quantile(exp(fit_1$draws("coef_treat", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 2)
+round(quantile(exp(fit_1_ACT$draws("coef_treat", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 2)
+round(quantile(exp(fit_1_NSW$draws("coef_treat", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 2)
 
 ggsave(
   mcmc_trace(fit_1$draws(c("intercept", "coef_inc_c", "coef_treat", "sigma_week_year", "mu_c_prior_mean", "mu_c_prior_sd"))),
-  file = "model_1_traceplot.pdf",
+  file = "model_1_traceplot_QLD.pdf",
+  height = 10,
+  width = 20,
+  units = "cm",
+  device = "pdf"
+)
+
+ggsave(
+  mcmc_trace(fit_1_ACT$draws(c("intercept", "coef_inc_c", "coef_treat", "sigma_week_year", "mu_c_prior_mean", "mu_c_prior_sd"))),
+  file = "model_1_traceplot_ACT.pdf",
+  height = 10,
+  width = 20,
+  units = "cm",
+  device = "pdf"
+)
+
+ggsave(
+  mcmc_trace(fit_1_NSW$draws(c("intercept", "coef_inc_c", "coef_treat", "sigma_week_year", "mu_c_prior_mean", "mu_c_prior_sd"))),
+  file = "model_1_traceplot_NSW.pdf",
   height = 10,
   width = 20,
   units = "cm",
@@ -446,7 +549,7 @@ ggsave(
   xlab("Sampled number of doses") + ylab("Modelled number of doses") +
   geom_abline(slope = 1, intercept = 0, linetype = 2) +
   theme(text = element_text(size = 15)) +
-  facet_wrap(~state, scales = "free") +
+  facet_wrap(model ~ state, scales = "free") +
   scale_fill_manual(values = model_cols) +
 
   ggplot(data = offset_births_df,
@@ -454,7 +557,7 @@ ggsave(
   geom_pointrange(size = 0.75, alpha = 0.75, shape = 21) +
   geom_abline(slope = 1, intercept = 0, linetype = 2) +
   theme(text = element_text(size = 15)) +
-  facet_wrap(~ state, scales = "free") +
+  facet_wrap(model ~ state, scales = "free") +
   xlab("Sampled number of births") + ylab("Modelled cohort size") +
   scale_fill_manual(values = model_cols) +
   plot_layout(nrow = 2, guides = "collect") +
@@ -462,7 +565,7 @@ ggsave(
 
   file = "measurement_error_plots.pdf",
   device = "pdf",
-  height = 20,
+  height = 30,
   width = 37.5,
   units = "cm"
 )
@@ -499,18 +602,18 @@ actual_fitted_plot_independent_models <- ggplot(
   data = rbind(model_2_data_ACT, model_2_data_NSW, model_2_data_QLD),
   aes(x = inc, y = med, col = factor(cohort_birth_months))) +
   geom_pointrange(alpha = 0.5, aes(ymin = low, ymax = up)) +
-  geom_abline(slope = 1, intercept = 0, linetype = 2, linewidth = 0.75) +
-  xlab("Sampled monthly incidence per cohort") +
-  ylab("Predicted monthly incidence per cohort") +
+  geom_abline(slope = 1, intercept = 0, linetype = 2, size = 0.75) +
+  xlab("Sampled monthly notifications per cohort") +
+  ylab("Predicted monthly notifications per cohort") +
   scale_colour_manual(values = cols, name = "Cohort") +
   facet_wrap(~state, scales = "free")
 
 actual_fitted_plot_pooled_model <- ggplot(data = model_3_data,
                                           aes(x = inc, y = med, col = factor(cohort_birth_months))) +
   geom_pointrange(alpha = 0.5, aes(ymin = low, ymax = up)) +
-  geom_abline(slope = 1, intercept = 0, linetype = 2, linewidth = 0.75) +
-  xlab("Sampled monthly incidence per cohort") +
-  ylab("Predicted monthly incidence per cohort") +
+  geom_abline(slope = 1, intercept = 0, linetype = 2, size = 0.75) +
+  xlab("Sampled monthly notifications per cohort") +
+  ylab("Predicted monthly notifications per cohort") +
   scale_colour_manual(values = cols, name = "Cohort") +
   facet_wrap(~state, scales = "free")
 
@@ -550,15 +653,7 @@ gen_age_effect <- function(fit, model_data, glm_overall_effect){
                       simplify = FALSE
                       ) |> bind_rows() |> rename("l" = 1, "m" = 2, "u" = 3) |> mutate(age_rsv_months = ages_in)
 
-  age_IRR_pooled <-
-    apply(
-      exp(ages_coef) /
-        exp(rep(0.1, length(ages_in)) %o% as.vector(fit$draws("coef_age_l", format = "draws_matrix")) +
-              (log(rep(0.1, length(ages_in))) %o% as.vector(fit$draws("coef_age_s", format = "draws_matrix")))),
-      1, quantile, probs = probs_in) |>
-    t() |> as.data.frame() |> rename("l" = 1, "m" = 2, "u" = 3) |> mutate(age_rsv_months = ages_in)
-
-  return(list("avg_eff_age" = avg_eff_age, "age_IRR_pooled" = age_IRR_pooled))
+  return(list("avg_eff_age" = avg_eff_age))
   }
 
 age_eff_ACT <- gen_age_effect(fit_2_ACT, model_2_data_ACT, glm_overall_effect_ACT)
@@ -582,7 +677,7 @@ age_plot_pooled <- ggplot(data = model_3_data,
   geom_ribbon(data = avg_eff_age_pooled,
               aes(x = age_rsv_months, ymin = l, ymax = u), inherit.aes = FALSE, alpha = 0.25) +
   geom_line(data = avg_eff_age_pooled,
-            aes(x = age_rsv_months, y = m), inherit.aes = FALSE, linewidth = 0.5) +
+            aes(x = age_rsv_months, y = m), inherit.aes = FALSE, size = 0.5) +
   ylab("Monthly RSV notifications per cohort") +
   xlab("Age in months") +
   scale_colour_manual(name = "Cohort", values = cols)
@@ -593,26 +688,11 @@ age_plot_independent <- ggplot(data = model_3_data,
   geom_ribbon(data = avg_eff_age_df,
               aes(x = age_rsv_months, ymin = l, ymax = u), inherit.aes = FALSE, alpha = 0.25) +
   geom_line(data = avg_eff_age_df,
-            aes(x = age_rsv_months, y = m), inherit.aes = FALSE, linewidth = 0.5) +
+            aes(x = age_rsv_months, y = m), inherit.aes = FALSE, size = 0.5) +
   ylab("Monthly RSV notifications per cohort") +
   xlab("Age in months") +
   scale_colour_manual(name = "Cohort", values = cols) +
   facet_wrap(~state, scales = "free")
-
-# incidence rate ratio
-age_IRR_pooled_plot <- ggplot(data = age_eff_pooled$age_IRR_pooled,
-                         aes(x = age_rsv_months, y = m, ymin = l, ymax = u)) +
-  geom_ribbon(alpha = 0.25) + geom_line() +
-  ylab("Incidence rate ratio relative to 0.1 month old infants") + xlab("Age in months")
-
-age_IRR_independent_plot <- ggplot(data = rbind(age_eff_ACT$age_IRR_pooled |> mutate(state = "ACT"),
-                                           age_eff_NSW$age_IRR_pooled |> mutate(state = "NSW"),
-                                           age_eff_QLD$age_IRR_pooled |> mutate(state = "QLD")),
-                              aes(x = age_rsv_months, y = m, ymin = l, ymax = u, fill = state)) +
-  geom_ribbon(alpha = 0.25) + geom_line(aes(col = state), linewidth = 1) +
-  ylab("Incidence rate ratio relative to 0.1 month old infants") + xlab("Age in months") +
-  scale_colour_manual(values = col_states) +
-  scale_fill_manual(values = col_states)
 
 # seasonality
 
@@ -637,12 +717,7 @@ gen_season_effect <- function(fit, model_data, glm_overall_effect){
                         simplify = FALSE
   ) |> bind_rows() |> rename("l" = 1, "m" = 2, "u" = 3) |> mutate(months = months_in)
 
-  IRR <- apply(exp(months_coef) / exp((sin(rep(1, n_months) * 2 * pi / 12) %o% as.vector(fit$draws("coef_month_s", format = "draws_matrix"))) +
-                        (cos(rep(1, n_months) * 2 * pi / 12) %o% as.vector(fit$draws("coef_month_c", format = "draws_matrix")))),
-        1, quantile, probs = probs_in) |>
-    t() |> as.data.frame() |> rename("l" = 1, "m" = 2, "u" = 3) |> mutate(months = months_in)
-
-  return(list("avg_eff_season" = avg_eff_season, "IRR" = IRR))
+  return(list("avg_eff_season" = avg_eff_season))
 
 }
 
@@ -686,24 +761,6 @@ avg_eff_season_pooled <- sapply(1:n_months,
 
 avg_eff_season_pooled$state <- c("ACT", "NSW", "QLD")[as.numeric(avg_eff_season_pooled$state_index)]
 
-IRR_season_pooled <- sapply(1:n_months,
-                            function(i){
-
-                              months_coef <- (sin(months_in[i] * 2 * pi / 12) * fit_3$draws("coef_month_s", format = "draws_matrix")) +
-                                                 (cos(months_in[i] * 2 * pi / 12) * fit_3$draws("coef_month_c", format = "draws_matrix"))
-
-                              months_coef_1 <- (sin(1 * 2 * pi / 12) * fit_3$draws("coef_month_s", format = "draws_matrix")) +
-                                                   (cos(1 * 2 * pi / 12) * fit_3$draws("coef_month_c", format = "draws_matrix"))
-
-                              out <- apply(exp(months_coef) / exp(months_coef_1), 2, quantile, probs = probs_in) |> t() |> as.data.frame() |>
-                                mutate(months = months_in[i], state = c("ACT", "NSW", "QLD"))
-
-                              rownames(out) <- NULL
-
-                              return(out)
-                            }, simplify = FALSE) |> bind_rows() |> rename("l" = 1, "m" = 2, "u" = 3)
-
-
 avg_eff_season_df <- rbind(avg_eff_season_ACT |> mutate(state = "ACT", model = "independent"),
                            avg_eff_season_NSW |> mutate(state = "NSW", model = "independent"),
                            avg_eff_season_QLD |> mutate(state = "QLD", model = "independent"))
@@ -712,7 +769,7 @@ season_data_plot_independent <- ggplot(data = model_3_data,
                            aes(x = month, y = inc, col = as.character(cohort_birth_months))) +
   geom_point(alpha = 0.5, position = position_jitter(width = 0.1)) +
   geom_ribbon(data = avg_eff_season_df, aes(x = months, ymin = l, ymax = u), alpha = 0.25, inherit.aes = FALSE) +
-  geom_line(data = avg_eff_season_df, aes(x = months, y = m), inherit.aes = FALSE, linewidth = 0.5) +
+  geom_line(data = avg_eff_season_df, aes(x = months, y = m), inherit.aes = FALSE, size = 0.5) +
   ylab("Monthly RSV notifications per cohort") +
   xlab("Month") +
   scale_x_continuous(breaks = seq(1, 12, 1), labels = month.abb[seq(1, 12, 1)]) +
@@ -723,31 +780,12 @@ season_data_plot_pooled <- ggplot(data = model_3_data,
                                   aes(x = month, y = inc, col = as.character(cohort_birth_months))) +
   geom_point(alpha = 0.5, position = position_jitter(width = 0.1)) +
   geom_ribbon(data = avg_eff_season_pooled, aes(x = months, ymin = l, ymax = u), alpha = 0.25, inherit.aes = FALSE) +
-  geom_line(data = avg_eff_season_pooled, aes(x = months, y = m), inherit.aes = FALSE, linewidth = 0.5) +
+  geom_line(data = avg_eff_season_pooled, aes(x = months, y = m), inherit.aes = FALSE, size = 0.5) +
   ylab("Monthly RSV notifications per cohort") +
   xlab("Month") +
   scale_x_continuous(breaks = seq(1, 12, 1), labels = month.abb[seq(1, 12, 1)]) +
   scale_colour_manual(name = "Cohort", values = cols) +
   facet_wrap(~state, scales = "free_y")
-
-# incidence rate ratio
-season_IRR_pooled_plot <- ggplot(data = IRR_season_pooled,
-                         aes(x = months, y = m, ymin = l, ymax = u)) +
-  geom_ribbon(alpha = 0.25, aes(fill = state)) + geom_line(aes(col = state), linewidth = 1) +
-  ylab("Incidence rate ratio relative January") + xlab("Month") +
-  scale_colour_manual(values = col_states, name = "State") +
-  scale_fill_manual(values = col_states, name = "State") +
-  scale_x_continuous(breaks = seq(1, 12), labels = month.abb)
-
-season_IRR_independent_plot <- ggplot(data = rbind(eff_season_ACT$IRR |> mutate(state = "ACT"),
-                                           eff_season_NSW$IRR |> mutate(state = "NSW"),
-                                           eff_season_QLD$IRR |> mutate(state = "QLD")),
-                              aes(x = months, y = m, ymin = l, ymax = u)) +
-  geom_ribbon(alpha = 0.25, aes(fill = state)) + geom_line(aes(col = state), linewidth = 1) +
-  ylab("Incidence rate ratio relative to January") + xlab("Month") +
-  scale_colour_manual(values = col_states) +
-  scale_fill_manual(values = col_states) +
-  scale_x_continuous(breaks = seq(1, 12), labels = month.abb)
 
 ### coverage
 
@@ -767,7 +805,7 @@ glm_dose_state_specific <- model_3_data$cov * t(fit_3$draws("coef_doses_state", 
 
 e_inc_m_cov_pooled <- glm_overall_effect_pooled - glm_dose_state_specific
 
-cov_in <- seq(0, 1, 0.025)
+cov_in <- unique(sort(c(seq(0, 0.11, 0.0005), seq(0, 1, 0.025))))
 n_cov <- length(cov_in)
 
 avg_eff_cov_pooled <- sapply(1:n_cov,
@@ -798,7 +836,7 @@ gen_cov_effect <- function(fit, model_data, model_data_in, glm_overall_effect, b
 
   e_inc_m_cov <- glm_overall_effect - glm_cov
 
-  cov_in <- seq(0, 1, 0.025)
+  cov_in <- unique(sort(c(seq(0, 0.11, 0.0005), seq(0, 1, 0.025))))
   n_cov <- length(cov_in)
 
   cov_coef <- cov_in %o% as.vector(fit$draws("coef_doses", format = "draws_matrix"))
@@ -812,96 +850,83 @@ gen_cov_effect <- function(fit, model_data, model_data_in, glm_overall_effect, b
 
 }
 
+max_ACT_cov <- max(subset(model_3_data, state == "ACT")$cov)
+max_NSW_cov <- max(subset(model_3_data, state == "NSW")$cov)
+max_QLD_cov <- max(subset(model_3_data, state == "QLD")$cov)
+
 avg_eff_cov_ACT <- gen_cov_effect(fit_2_ACT, model_2_data_ACT, model_2_data_ACT_in, glm_overall_effect_ACT, ACT_births)
 avg_eff_cov_NSW <- gen_cov_effect(fit_2_NSW, model_2_data_NSW, model_2_data_NSW_in, glm_overall_effect_NSW, NSW_births)
 avg_eff_cov_QLD <- gen_cov_effect(fit_2_QLD, model_2_data_QLD, model_2_data_QLD_in, glm_overall_effect_QLD, QLD_births)
 
-avg_eff_cov_df <- rbind(avg_eff_cov_ACT |> mutate(state = "ACT", model = "independent"),
-                        avg_eff_cov_NSW |> mutate(state = "NSW", model = "independent"),
-                        avg_eff_cov_QLD |> mutate(state = "QLD", model = "independent"))
+avg_eff_cov_df <- rbind(avg_eff_cov_ACT |> mutate(state = "ACT", model = "independent") |> filter(cov <= max_ACT_cov),
+                        avg_eff_cov_NSW |> mutate(state = "NSW", model = "independent") |> filter(cov <= max_NSW_cov),
+                        avg_eff_cov_QLD |> mutate(state = "QLD", model = "independent") |> filter(cov <= max_QLD_cov)
+                        )
+
+avg_eff_cov_pooled <- avg_eff_cov_pooled |> left_join(data.frame(max_cov = c(max_ACT_cov, max_NSW_cov, max_QLD_cov), state = c("ACT", "NSW", "QLD"))) |>
+  filter(cov <= max_cov) |> select(-max_cov)
 
 cov_data_plot_pooled <- ggplot(data = model_3_data,
                            aes(x = cov, y = inc, col = as.character(cohort_birth_months))) +
   geom_point(alpha = 0.5) +
   geom_ribbon(data = subset(avg_eff_cov_pooled, state != "pooled"), aes(x = cov, ymin = l, ymax = u), alpha = 0.25, inherit.aes = FALSE) +
-  geom_line(data = subset(avg_eff_cov_pooled, state != "pooled"), aes(x = cov, y = m), inherit.aes = FALSE, linewidth = 0.5) +
+  geom_line(data = subset(avg_eff_cov_pooled, state != "pooled"), aes(x = cov, y = m), inherit.aes = FALSE, size = 0.5) +
   scale_colour_manual(name = "Cohort", values = cols) +
   ylab("Monthly RSV notifications per cohort") +
   xlab("Proportion of cohort immunised with Nirsevimab in previous 6-months") +
   scale_x_continuous(breaks = seq(0, 1, 0.2), labels = scales::percent) +
-  facet_wrap(~state, scales = "free_y")
+  facet_wrap(~state, scales = "free")
 
 cov_data_plot_independent <- ggplot(data = model_3_data,
                                aes(x = cov, y = inc, col = as.character(cohort_birth_months))) +
   geom_point(alpha = 0.5) +
   geom_ribbon(data = avg_eff_cov_df, aes(x = cov, ymin = l, ymax = u), alpha = 0.25, inherit.aes = FALSE) +
-  geom_line(data = avg_eff_cov_df, aes(x = cov, y = m), inherit.aes = FALSE, linewidth = 0.5) +
+  geom_line(data = avg_eff_cov_df, aes(x = cov, y = m), inherit.aes = FALSE, size = 0.5) +
   scale_colour_manual(name = "Cohort", values = cols) +
   ylab("Monthly RSV notifications per cohort") +
   xlab("Proportion of cohort immunised with Nirsevimab in previous 6-months") +
-  scale_x_continuous(breaks = seq(0, 1, 0.2), labels = scales::percent) +
-  facet_wrap(~state, scales = "free_y")
+  scale_x_continuous(labels = scales::percent) +
+  facet_wrap(~state, scales = "free")
 
-IRR_cov_pooled <- apply(exp(fit_3$draws("coef_doses_state", format = "draws_matrix")), 2, quantile, probs = probs_in) |>
-  t() |> as.data.frame() |> rename("l" = 1, "m" = 2, "u" = 3) |> mutate("state" = c("ACT", "NSW", "QLD")) |>
-  rbind(quantile(exp(fit_3$draws("coef_doses", format = "draws_matrix")), probs = probs_in) |> t() |>
-          as.data.frame() |> rename("l" = 1, "m" = 2, "u" = 3) |> mutate("state" = c("Pooled")))
-
-IRR_cov_pooled$state <- factor(IRR_cov_pooled$state, levels = c("ACT", "NSW", "QLD", "Pooled"))
-
-IRR_cov_plot_pooled <- ggplot(data = IRR_cov_pooled,
-                              aes(x = state, y = m, ymin = l, ymax = u, col = state)) +
-  geom_pointrange() +
-  xlab("State") + ylab("Incidence rate ratio of 100% Nirsevimab\ncoverage relative 0% coverage") +
-  scale_colour_manual(values = c(col_states, "Pooled" = "black")) +
-  theme(legend.position = "none")
-
-IRR_cov_independent <- rbind(quantile(exp(fit_2_ACT$draws("coef_doses", format = "draws_matrix")), probs = probs_in) |> t() |>
-                               as.data.frame() |> rename("l" = 1, "m" = 2, "u" = 3) |> mutate("state" = c("ACT")),
-                             quantile(exp(fit_2_NSW$draws("coef_doses", format = "draws_matrix")), probs = probs_in) |> t() |>
-                               as.data.frame() |> rename("l" = 1, "m" = 2, "u" = 3) |> mutate("state" = c("NSW")),
-                             quantile(exp(fit_2_QLD$draws("coef_doses", format = "draws_matrix")), probs = probs_in) |> t() |>
-                               as.data.frame() |> rename("l" = 1, "m" = 2, "u" = 3) |> mutate("state" = c("QLD"))
-                             )
-
-IRR_cov_independent$state <- factor(IRR_cov_independent$state, levels = c("ACT", "NSW", "QLD"))
-
-IRR_cov_plot_independent <- ggplot(data = IRR_cov_independent,
-                              aes(x = state, y = m, ymin = l, ymax = u, col = state)) +
-  geom_pointrange() +
-  xlab("State") + ylab("Incidence rate ratio of 100% Nirsevimab\ncoverage relative 0% coverage") +
-  scale_colour_manual(values = col_states) +
-  theme(legend.position = "none")
+grid_layout <- "
+  AABC
+  DDEE
+"
 
 ggsave(
-  (actual_fitted_plot_pooled_model) +
-    ((age_plot_pooled + theme(legend.position = "none") + plot_spacer() + plot_layout(widths = c(1, 0.5)))) +
+  actual_fitted_plot_pooled_model +
+    (age_plot_pooled + theme(legend.position = "none")) +
+    guide_area() +
     (season_data_plot_pooled + theme(legend.position = "none")) +
     (cov_data_plot_pooled + theme(legend.position = "none")) +
-    (age_IRR_pooled_plot + season_IRR_pooled_plot + IRR_cov_plot_pooled) +
-    guide_area() +
-    plot_layout(nrow = 3, guides = "collect") +
-    plot_annotation(tag_levels = c("a")) & theme(legend.box = "horizontal"),
+    plot_layout(design = grid_layout, guides = "collect", widths = c(1, 1)) +
+    plot_annotation(tag_levels = c("a")),
   file = "model_2_plots_pooled.pdf",
   device = "pdf",
-  height = 37.5,
-  width = 57.5,
+  height = 25,
+  width = 55,
   units = "cm"
 )
 
 ggsave(
-  actual_fitted_plot_independent_models + (age_plot_independent + theme(legend.position = "none")) +
+  (actual_fitted_plot_independent_models +
+     guides(color = guide_legend(ncol = 3))) + (age_plot_independent + theme(legend.position = "none")) +
   (season_data_plot_independent + theme(legend.position = "none")) +
     (cov_data_plot_independent + theme(legend.position = "none")) +
-    (age_IRR_independent_plot + season_IRR_independent_plot + IRR_cov_plot_independent) + guide_area() +
-    plot_layout(nrow = 3, guides = "collect") +
-  plot_annotation(tag_levels = c("a")) & theme(legend.box = "horizontal"),
+    plot_layout(nrow = 2, guides = "collect") +
+  plot_annotation(tag_levels = c("a")),
   file = "model_2_plots_independent.pdf",
   device = "pdf",
-  height = 37.5,
-  width = 57.5,
+  height = 25,
+  width = 60,
   units = "cm"
 )
+
+max_cov <- model_3_data |> summarise(max_cov = max(cov), .by = c("state"))
+
+round(quantile((1 - exp(t(fit_2_ACT$draws("coef_doses", format = "draws_matrix")) |> as.vector() * max_cov[1,2])) * 100, probs = c(0.025, 0.5, 0.975)), digits = 1)
+round(quantile((1 - exp(t(fit_2_NSW$draws("coef_doses", format = "draws_matrix")) |> as.vector() * max_cov[2,2])) * 100, probs = c(0.025, 0.5, 0.975)), digits = 1)
+round(quantile((1 - exp(t(fit_2_QLD$draws("coef_doses", format = "draws_matrix")) |> as.vector() * max_cov[3,2])) * 100, probs = c(0.025, 0.5, 0.975)), digits = 1)
 
 ################################
 ##### counterfactual plots #####
@@ -947,7 +972,7 @@ calc_cf <- function(cf, year_month){
 cf_cs <- rbind(calc_cf(cf_dose_on[QLD_inds,], year_month_all) |> mutate(model = "100% Nirsevimab coverage - QLD"),
                calc_cf(cf_dose_on_pooled[QLD_inds,], year_month_all) |> mutate(model = "100% Nirsevimab coverage - pooled"),
                calc_cf(cf_dose_off[QLD_inds], year_month_all) |> mutate(model = "0% Nirsevimab coverage"),
-               calc_cf(cf_obs[QLD_inds], year_month_all) |> mutate(model = "Predicted"))
+               calc_cf(cf_obs[QLD_inds], year_month_all) |> mutate(model = "Observed"))
 
 obs_cs <- model_3_data[QLD_inds,] |> filter(rsv_start_month >= "2024-01-01") |>
   ungroup() |> summarise(inc = sum(inc), .by = c(rsv_start_month)) |>
@@ -974,7 +999,7 @@ age_index <- which(model_3_data$age_rsv_months <= 6 & model_3_data$state == "QLD
 cf_cs_6_month <- rbind(calc_cf(cf_dose_on[age_index,], model_3_data$rsv_start_month[age_index]) |> mutate(model = "100% Nirsevimab coverage - QLD"),
                        calc_cf(cf_dose_off[age_index,], model_3_data$rsv_start_month[age_index]) |> mutate(model = "0% Nirsevimab coverage"),
                        calc_cf(cf_dose_on_pooled[age_index,], model_3_data$rsv_start_month[age_index]) |> mutate(model = "100% Nirsevimab coverage - pooled"),
-                       calc_cf(cf_obs[age_index,], model_3_data$rsv_start_month[age_index]) |> mutate(model = "Predicted"))
+                       calc_cf(cf_obs[age_index,], model_3_data$rsv_start_month[age_index]) |> mutate(model = "Observed"))
 
 obs_cs_6_month <- model_3_data[age_index,] |>
   filter(rsv_start_month >= "2024-01-01") |>
@@ -1002,8 +1027,8 @@ width = 35,
 units = "cm",
 device = "pdf"
 )
-# independent model
 
+# independent model
 model_2_data_QLD <- model_2_data_QLD |> left_join(subset(model_3_data, state == "QLD")[, c("month", "year", "age_rsv_months", "cohort_birth_start_month", "cohort",
                                                                                            "min_date_nirsevimab", "cov")]) |>
   mutate(cov_cf_on = ifelse(age_rsv_months <= 6 & year >= 2024, 1, 0), cov_cf_off = 0) |>
@@ -1020,17 +1045,14 @@ cf_dose_on_independent <- matrix(rpois(n_obs * n_iter,
                                              (model_2_data_QLD$cov_cf_on %o% as.vector(fit_2_QLD$draws("coef_doses", format = "draws_matrix"))))
                                        ), nrow = n_obs)
 
-cf_dose_off_independent <- matrix(rpois(n_obs * n_iter,
-                                        exp(glm_overall_effect_QLD - glm_dose_QLD)
-),
-nrow = n_obs)
+cf_dose_off_independent <- matrix(rpois(n_obs * n_iter, exp(glm_overall_effect_QLD - glm_dose_QLD)), nrow = n_obs)
 
 QLD_inds <- which(model_2_data_QLD$rsv_start_month >= "2024-01-01")
 year_month_all <- model_2_data_QLD$rsv_start_month[QLD_inds]
 
 cf_cs_independent <- rbind(calc_cf(cf_dose_on_independent[QLD_inds], year_month_all) |> mutate(model = "100% Nirsevimab coverage"),
                            calc_cf(cf_dose_off_independent[QLD_inds], year_month_all) |> mutate(model = "0% Nirsevimab coverage"),
-                           calc_cf(cf_obs_independent[QLD_inds], year_month_all) |> mutate(model = "Predicted"))
+                           calc_cf(cf_obs_independent[QLD_inds], year_month_all) |> mutate(model = "Observed"))
 
 obs_cs_independent <- model_2_data_QLD[QLD_inds,] |> filter(rsv_start_month >= "2024-01-01") |>
   ungroup() |> summarise(inc = sum(inc), .by = c(rsv_start_month)) |>
@@ -1045,8 +1067,8 @@ cf_all_plot_independent <- ggplot(data = cf_cs_independent,
   geom_point(data = obs_cs_independent, aes(x = rsv_start_month, y = c_inc), inherit.aes = FALSE) +
   ylab("Cumulative notifications in 0 - 59 month olds") +
   xlab("Month-Year") +
-  scale_colour_manual(name = "Counterfactual", values = c("#D55E00", "#009E73", "#0072B2")) +
-  scale_fill_manual(name = "Counterfactual", values = c("#D55E00", "#009E73", "#0072B2")) +
+  scale_colour_manual(name = "", values = c("#D55E00", "#009E73", "#0072B2")) +
+  scale_fill_manual(name = "", values = c("#D55E00", "#009E73", "#0072B2")) +
   scale_y_continuous(limits = c(0, 21000), breaks = seq(0, 20000, 5000))
 
 # under 6-month olds only
@@ -1055,7 +1077,7 @@ age_index <- which(model_2_data_QLD$age_rsv_months <= 6 & model_2_data_QLD$rsv_s
 
 cf_cs_6_month_independent <- rbind(calc_cf(cf_dose_on_independent[age_index,], model_2_data_QLD$rsv_start_month[age_index]) |> mutate(model = "100% Nirsevimab coverage"),
                                    calc_cf(cf_dose_off_independent[age_index,], model_2_data_QLD$rsv_start_month[age_index]) |> mutate(model = "0% Nirsevimab coverage"),
-                                   calc_cf(cf_obs_independent[age_index,], model_2_data_QLD$rsv_start_month[age_index]) |> mutate(model = "Predicted"))
+                                   calc_cf(cf_obs_independent[age_index,], model_2_data_QLD$rsv_start_month[age_index]) |> mutate(model = "Observed"))
 
 obs_cs_6_month_independent <- model_2_data_QLD[age_index, ] |>
   ungroup() |> group_by(rsv_start_month) |> summarise(inc = sum(inc)) |>
@@ -1070,39 +1092,35 @@ cf_6m_plot_independent <- ggplot(data = cf_cs_6_month_independent,
   geom_point(data = obs_cs_6_month_independent, aes(x = rsv_start_month, y = c_inc), inherit.aes = FALSE) +
   ylab("Cumulative notifications in 0 - 6 month olds") +
   xlab("Month-Year") +
-  scale_colour_manual(name = "Counterfactual", values = c("#D55E00", "#009E73", "#0072B2")) +
-  scale_fill_manual(name = "Counterfactual", values = c("#D55E00", "#009E73", "#0072B2")) +
+  scale_colour_manual(name = "", values = c("#D55E00", "#009E73", "#0072B2")) +
+  scale_fill_manual(name = "", values = c("#D55E00", "#009E73", "#0072B2")) +
   scale_y_continuous(limits = c(0, 3250), breaks = seq(0, 3000, 500))
 
-ggsave(
-  cf_all_plot_independent + cf_6m_plot_independent + plot_layout(guides = "collect") + plot_annotation(tag_levels = c("a")),
-  file = "counterfactual_plots_independent.pdf",
-  height = 12.5,
-  width = 35,
-  units = "cm",
-  device = "pdf"
-)
 
 # estimated effectiveness (predicated relative to 0% coverage)
 cf_0 <- cf_dose_off_independent[age_index,]
+cf_on <- cf_dose_on_independent[age_index,]
 cf_p <- cf_obs_independent[age_index,]
 
 cf_0_summed_matrix <- rowsum(cf_0, group = model_2_data_QLD$rsv_start_month[age_index], reorder = TRUE)
+cf_on_summed_matrix <- rowsum(cf_on, group = model_2_data_QLD$rsv_start_month[age_index], reorder = TRUE)
 cf_p_summed_matrix <- rowsum(cf_p, group = model_2_data_QLD$rsv_start_month[age_index], reorder = TRUE)
 
 model_1_IRR <- round(quantile(exp(fit_1$draws("coef_treat", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 2)
-
-model_1_eff <- round(quantile(1 - exp(fit_1$draws("coef_treat", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 2) * 100
+model_1_eff <- round(quantile(1 - exp(fit_1$draws("coef_treat", format = "draws_matrix")), probs = c(0.025, 0.5, 0.975)), digits = 2)
 
 model_2_IRR <- round(quantile(colMeans(cf_p_summed_matrix[4:12,] / cf_0_summed_matrix[4:12,]), probs = probs_in), digits = 2)
-
-model_2_eff <- round(quantile(1 - colMeans(cf_p_summed_matrix[4:12,] / cf_0_summed_matrix[4:12,]), probs = probs_in), digits = 2) * 100
+model_2_eff <- round(quantile(1 - colMeans(cf_p_summed_matrix[4:12,] / cf_0_summed_matrix[4:12,]), probs = probs_in), digits = 2)
 
 pred_IRR <- apply(cf_p_summed_matrix / cf_0_summed_matrix, 1, quantile, probs = c(0.025, 0.5, 0.975)) |> t() |> as.data.frame() |>
     rename("l" = 1, "m" = 2, "u" = 3) |>
     mutate("rsv_start_month" = sort(unique(model_2_data_QLD$rsv_start_month[age_index])))
 
-pred_eff <- apply((1 - cf_p_summed_matrix / cf_0_summed_matrix) * 100, 1, quantile, probs = c(0.025, 0.5, 0.975)) |> t() |> as.data.frame() |>
+pred_eff <- apply((1 - cf_p_summed_matrix / cf_0_summed_matrix), 1, quantile, probs = c(0.025, 0.5, 0.975)) |> t() |> as.data.frame() |>
+  rename("l" = 1, "m" = 2, "u" = 3) |>
+  mutate("rsv_start_month" = sort(unique(model_2_data_QLD$rsv_start_month[age_index])))
+
+pred_eff_cf_on <- apply((1 - cf_on_summed_matrix / cf_0_summed_matrix), 1, quantile, probs = c(0.025, 0.5, 0.975)) |> t() |> as.data.frame() |>
   rename("l" = 1, "m" = 2, "u" = 3) |>
   mutate("rsv_start_month" = sort(unique(model_2_data_QLD$rsv_start_month[age_index])))
 
@@ -1117,30 +1135,42 @@ extra_points <- data.frame(
   model_name = c("model 1", "model 2")
 )
 
-ggplot(data = subset(pred_IRR, rsv_start_month >= "2024-04-01"),
-       aes(x = rsv_start_month, ymin = l, y = m, ymax = u)) +
-  geom_ribbon(alpha = 0.175) +
-  geom_pointrange(data = extra_points,
-                  aes(x = x, y = IRR_m, ymin = IRR_l, ymax = IRR_u, colour = model_name),
-                  size = 1) +
-  geom_line(linewidth = 1) +
-  scale_colour_manual(name = "", values = c("model 1" = "skyblue", "model 2" = "#0072B2")) +
-  scale_y_continuous(limits = c(0.25, 1.15), breaks = seq(0.3, 1.1, 0.1)) +
-  ylab("Incidence rate ratio of Nirsevimab treatment") +
-  xlab("Month") +
-  ggplot(data = subset(pred_eff, rsv_start_month >= "2024-04-01"),
+model_comp_plot <- ggplot(data = subset(rbind(pred_eff |> mutate(cf = "Observed"),
+                                              pred_eff_cf_on |> mutate(cf = "100% Nirsevimab coverage")),
+                                        rsv_start_month >= "2024-01-01"),
          aes(x = rsv_start_month, ymin = l, y = m, ymax = u)) +
-  geom_ribbon(alpha = 0.175) +
-  geom_line(size = 1) +
+  geom_ribbon(alpha = 0.175, aes(fill = cf)) +
+  geom_line(size = 1, aes(col = cf)) +
   geom_pointrange(data = extra_points,
-                 aes(x = x, y = eff_m, ymin = eff_l, ymax = eff_u, colour = model_name),
-                 size = 1) +
-  scale_colour_manual(name = "", values = c("model 1" = "skyblue", "model 2" = "#0072B2")) +
-  scale_y_continuous(limits = c(-15, 80), breaks = seq(-10, 80, 10)) +
-  ylab("Percent reduction in the monthly cases predicted\nwith the observed coverages relative the 0% counterfactual") +
-  xlab("Month") +
-  plot_layout(guides = "collect") +
-  plot_annotation(tag_levels = c("a"))
+                 aes(x = x, y = eff_m, ymin = eff_l, ymax = eff_u, shape = model_name),
+                 size = 1, fill = "#0072B2") +
+  scale_shape_manual(name = "Mean value over\nnirsevimab distribution time", values = c("model 1" = 21, "model 2" = 22)) +
+  scale_colour_manual(name = "", values = c("#009E73", "#0072B2")) +
+  scale_fill_manual(name = "", values = c("#009E73", "#0072B2")) +
+  scale_y_continuous(limits = c(-0.35, 0.9), breaks = seq(-0.3, 0.9, 0.1), labels = scales::percent) +
+  ylab("Predicted reduction in the monthly cases\nrelative to no nirsevimab distribution counterfactual") +
+  xlab("Month-Year") +
+  scale_x_date(date_labels = "%b %Y")
+
+ggsave(
+  (cf_all_plot_independent + theme(legend.position = c(0.3, 0.9),
+                                   legend.background = element_blank(),
+                                   legend.key = element_blank())) +
+    (cf_6m_plot_independent + theme(legend.position = c(0.3, 0.9),
+                                    legend.background = element_blank(),
+                                    legend.key = element_blank())) +
+    (model_comp_plot + theme(legend.position = c(0.75, 0.2),
+                             legend.title = element_text(size = 8),
+                             legend.background = element_blank(),
+                             legend.key = element_blank(),
+                             legend.spacing.y = unit(-0.2, "cm")) +
+       guides(shape = guide_legend(override.aes = list(size = 0.5)))) + plot_annotation(tag_levels = c("a")),
+  file = "counterfactual_plots_independent.pdf",
+  height = 12.5,
+  width = 35,
+  units = "cm",
+  device = "pdf"
+)
 
 ##############################
 ##### model coefficients #####
@@ -1201,7 +1231,29 @@ write.csv(fit_1$summary(c("intercept", "coef_inc_c", "coef_treat", "sigma_week_y
          u = round(u, digits = 2)
          ) |>
   relocate(c("variable","coef",  "m", "l", "u")),
-  file = "coef_model_1.csv")
+  file = "coef_model_1_QLD.csv")
+
+write.csv(fit_1_ACT$summary(c("intercept", "coef_inc_c", "coef_treat", "sigma_week_year", "mu_c_prior_mean", "mu_c_prior_sd"),
+                        extra_quantiles = ~posterior::quantile2(., probs = probs_in)) |>
+            as.data.frame() |> rename("l" = 2, "m" = 3, "u" = 4) |>
+            mutate(coef = c("$\\alpha$", "$\\beta_{1}$", "$\\beta_{2}$", "$c$", "$a$", "$b$"),
+                   l = round(l, digits = 2),
+                   m = round(m, digits = 2),
+                   u = round(u, digits = 2)
+            ) |>
+            relocate(c("variable","coef",  "m", "l", "u")),
+          file = "coef_model_1_ACT.csv")
+
+write.csv(fit_1_NSW$summary(c("intercept", "coef_inc_c", "coef_treat", "sigma_week_year", "mu_c_prior_mean", "mu_c_prior_sd"),
+                        extra_quantiles = ~posterior::quantile2(., probs = probs_in)) |>
+            as.data.frame() |> rename("l" = 2, "m" = 3, "u" = 4) |>
+            mutate(coef = c("$\\alpha$", "$\\beta_{1}$", "$\\beta_{2}$", "$c$", "$a$", "$b$"),
+                   l = round(l, digits = 2),
+                   m = round(m, digits = 2),
+                   u = round(u, digits = 2)
+            ) |>
+            relocate(c("variable","coef",  "m", "l", "u")),
+          file = "coef_model_1_NSW.csv")
 
 ####################
 ##### efficacy #####
