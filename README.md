@@ -1,4 +1,4 @@
-# Impact and effectiveness of nirsevimab immunization programs on RSV notification in Queensland, New South Wales and the Australian Capital Territory, Australia
+# Population-level impact of differing nirsevimab program designs on RSV infection in three Australian jurisdictions
 
 This GitHub repository provides all code necessary for the paper.
 
